@@ -41,9 +41,9 @@ keywords:
   - Varnish
 
 resources:
-  homepage            : http://bucardo.org/dbixclass
+  homepage            : http://bucardo.org/dbixcache
   bugtracker          : http://bucardo.org/bugzilla/
-  repository          : http://bucardo.org/dbixclass.git/
+  repository          : http://bucardo.org/dbixcache.git/
   license             : http://bucardo.org/license.html
 
 meta-spec:
