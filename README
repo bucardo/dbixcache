@@ -1,0 +1,84 @@
+DBIx::Cache  --  caching for Perl DBI handles
+
+# $Id: README,v 1.1 2008/06/03 03:27:47 greg Exp greg $
+
+DESCRIPTION:
+------------
+
+This is version 1.0.1 of DBIx::Cache.  The web site for this interface, and 
+the latest version, can be found at:
+
+  http://bucardo.org/dbixcache
+
+For information on what has changed for each version, see the Changes files.
+
+BUG REPORTS
+-----------
+
+Please report all bugs and feature requests at:
+
+http://bucardo.org/bugzilla/
+
+REQUIREMENTS:
+-------------
+
+    build, test, and install Perl 5         (at least 5.6.1)
+    build, test, and install the DBI module (at least 1.52)
+    build, test, and install Test::Simple   (at least 0.47)
+
+INSTALLATION:
+-------------
+
+Before installing, please use the "cpansign -v" program to cryptographically 
+verify that your copy of DBIx::Cache is complete and valid. The program 
+"cpansign" is part of Module::Signature, available from CPAN.
+
+The usual steps to install DBIx::Cache are:
+
+    1.   perl Makefile.PL
+    2.   make
+    3.   make test
+    4.   make install
+
+Do steps 1 to 3 as a normal user, not as root!
+
+TESTING:
+--------
+
+The tests are not very useful without a database to connect to. 
+Currently, only Postgres, via the DBD::Pg driver, is supported.
+
+The DBD::Pg tests rely on being able to connect to a valid Postgres database. 
+The easiest way to ensure this is to set the following environment variables:
+
+    DBI_DSN=dbi:Pg:dbname=<database>
+    DBI_USER=<username>
+    DBI_PASS=<password>
+
+If you are running on a non-standard port, you must set PGPORT or 
+add the port to the DBI_DSN variable like this:
+
+    DBI_DSN='dbi:Pg:dbname=<database>;port=<port#>'
+
+Put double quotes around the dbname if it has a semicolon 
+or a space inside of it:
+
+    DBI_DSN='dbi:Pg:dbname="<data;base>"'
+
+You can increase the verbosity of the tests by setting the 
+environment variable TEST_VERBOSE.
+
+When reporting test failures, please use TEST_VERBOSE=1
+
+Please consider installing CPAN::Reporter so that your tests are 
+automatically gathered and reported, which helps the development 
+of DBIx::Cache.
+
+COPYRIGHT:
+----------
+
+    Copyright (c) 2008-2011 Greg Sabino Mullane
+
+You may distribute under the terms of either the GNU General Public
+License or the Artistic License, as specified in the Perl README file.
+

@@ -1,0 +1,763 @@
+ #!perl
+
+## Helper file for the testing modules
+
+use strict;
+use warnings;
+
+use vars qw/$rv $ekey $fetchpath $oid $oid2relnames $schema $t $SQL $key $sth $info/;
+
+my $TABLENAME = 'dxc_test';
+
+sub number_of_tests {
+	return 12;
+}
+
+sub create_test_tables {
+
+	my $dbh2 = shift;
+	$dbh2->do("CREATE TEMP TABLE $TABLENAME (a int, b text, c date)");
+	$dbh2->do("DROP TABLE ${TABLENAME}2");
+	$dbh2->do("CREATE TABLE ${TABLENAME}2 (a int, b text, c date)");
+	return;
+}
+
+sub test_table { return $TABLENAME; }
+sub test_table2 { return "${TABLENAME}2"; }
+
+our $location = '';
+my $testmsg  = '?';
+my $testline = '?';
+my $bail_on_error = 1;
+my $total_errors = 0;
+my $showline = 1;
+my $showtime = 0;
+
+FOO: {
+	no warnings; ## Yes, we know they are being redefined!
+	sub is_deeply {
+		t($_[2],$_[3] || (caller)[2]);
+		return if Test::More::is_deeply($_[0],$_[1],$testmsg);
+		if ($bail_on_error > $total_errors++) {
+			my $line = (caller)[2];
+			my $time = time;
+			Test::More::diag("GOT: ".Dumper $_[0]);
+			Test::More::diag("EXPECTED: ".Dumper $_[1]);
+			Test::More::BAIL_OUT("Stopping on a failed 'is_deeply' test from line $line. Time: $time");
+		}
+	} ## end of is_deeply
+	sub like($$;$) {
+		t($_[2],(caller)[2]);
+		return if Test::More::like($_[0],$_[1],$testmsg);
+		if ($bail_on_error > $total_errors++) {
+			my $line = (caller)[2];
+			my $time = time;
+			Test::More::diag("GOT: ".Dumper $_[0]);
+			Test::More::diag("EXPECTED: ".Dumper $_[1]);
+			Test::More::BAIL_OUT("Stopping on a failed 'like' test from line $line. Time: $time");
+		}
+	} ## end of like
+	sub pass(;$) {
+		t($_[0],$_[1]||(caller)[2]);
+		Test::More::pass($testmsg);
+	} ## end of pass
+	sub is($$;$) {
+		t($_[2],(caller)[2]);
+		return if Test::More::is($_[0],$_[1],$testmsg);
+		if ($bail_on_error > $total_errors++) {
+			my $line = (caller)[2];
+			my $time = time;
+			Test::More::BAIL_OUT("Stopping on a failed 'is' test from line $line. Time: $time");
+		}
+	} ## end of is
+	sub isa_ok($$;$) {
+		t("Object isa $_[1]",(caller)[2]);
+		my ($name, $type, $msg) = ($_[0],$_[1]);
+		if (ref $name and ref $name eq $type) {
+			Test::More::pass($testmsg);
+			return;
+		}
+		$bail_on_error > $total_errors++ and Test::More::BAIL_OUT("Stopping on a failed test");
+	} ## end of isa_ok
+	sub ok($;$) {
+		t($_[1]||$testmsg);
+		return if Test::More::ok($_[0],$testmsg);
+		if ($bail_on_error > $total_errors++) {
+			my $line = (caller)[2];
+			my $time = time;
+			Test::More::BAIL_OUT("Stopping on a failed 'ok' test from line $line. Time: $time");
+		}
+	} ## end of ok
+sub t {
+	$testmsg = shift;
+	$testline = shift || (caller)[2];
+	$testmsg =~ s/^\s+//;
+	if ($location) {
+		$testmsg = "($location) $testmsg";
+	}
+	if ($showline and $testmsg !~ /line:/) {
+		$testmsg .= " [line: $testline]";
+	}
+	if ($showtime) {
+		my $time = time;
+		$testmsg .= " [time: $time]";
+	}
+	return;
+} ## end of t
+
+	1;
+}
+
+
+sub run_standard_tests {
+
+our $dbh = shift;
+
+my $table = test_table();
+my $table2 = test_table2();
+
+sub key { return $dbh->fetch_key(shift); }
+sub key_nohash { return $dbh->fetch_key(shift, {nohash => 1}); }
+
+sub statval {
+	my ($name,$val) = @_;
+	my $line = (caller)[2];
+	my $t = sprintf qq{Counter '$name' has a value of %s [line: $line]},
+		defined $val ? qq{"$val"} : 'UNDEF';
+	is (key_nohash($name), $val, $t);
+	return;
+}
+
+sub sprival {
+	my ($name,$val) = @_;
+	my $line = (caller)[2];
+	$t = sprintf qq{Statement attribute '$name' has a value of %s [line: $line]},
+		defined $val ? qq{"$val"} : 'UNDEF';
+	is ($sth->{$name}, $val, $t);
+	return;
+}
+
+sub sprivaldeep {
+	my ($name,$val) = @_;
+	my $line = (caller)[2];
+	$t = qq{Statement attribute '$name' has correct structure" [line: $line]};
+	is_deeply ($sth->{$name}, $val, $t);
+	return;
+}
+
+sub dprival {
+	my ($name,$val) = @_;
+	my $line = (caller)[2];
+	$t = sprintf qq{Statement attribute '$name' has a value of %s [line: $line]},
+		defined $val ? qq{"$val"} : 'UNDEF';
+	is( $dbh->{$name}, $val, $t);
+	return;
+}
+
+sub delete_query_keys {
+
+	## Remove any keys associated with a query
+	my $sql = shift;
+	$dbh->delete_key("p:$sql");
+	$dbh->delete_key("e:$sql");
+	return;
+}
+
+sub sdump {
+	## Debug dump of a private attrib
+	my $name = shift;
+	my $foo = $sth->{$name};
+	diag Dumper $foo;
+	return;
+}
+
+
+
+eval { create_test_tables($dbh); };
+$@ and Test::More::BAIL_OUT("Creation of test tables failed: $@\n");
+$dbh->commit();
+
+$t=q{Call to dxc_stats() worked};
+eval {
+	$dbh->dxc_stats(1);
+};
+is ($@, q{}, $t);
+
+$t=q{Call to dxc_stats() worked};
+eval {
+	$dbh->dxc_stats(1);
+};
+is ($@, q{}, $t);
+
+$t=q{Call to reset_dxc_stats() worked};
+eval {
+	$dbh->reset_dxc_stats();
+};
+is ($@, q{}, $t);
+
+$dbh->delete_key('oid2relnames');
+$dbh->delete_key('volfuncs');
+
+## TODO: Move connect tests here
+
+
+$SQL = "SELECT relname FROM pg_class LIMIT 3 --force_dxc_cache";
+$dbh->dxc_cache(1);
+delete_query_keys($SQL);
+#$dbh = DBI->connect('dbi:Pg:dbname=greg','greg','');
+$info = $dbh->selectall_arrayref($SQL);
+warn Dumper $info;
+exit;
+$sth = $dbh->prepare($SQL);
+$sth->execute();
+$info = $sth->fetch(); warn Dumper $info;
+$info = $sth->fetch(); warn Dumper $info;
+$info = $sth->fetchall_arrayref(); warn Dumper $info;
+exit;
+$sth->execute();
+$info = $sth->fetch(); warn Dumper $info;
+$info = $sth->fetch(); warn Dumper $info;
+$info = $sth->fetch(); warn Dumper $info;
+exit;
+
+
+##
+## The prepare() and finish() methods
+##
+
+$t=q{>> INSERT does not hit the cache};
+$SQL = "INSERT INTO $table(a,b) VALUES (?,?)";
+pass $t;
+## Make sure these are zeroed out before we begin:
+statval (nocache_noselect  => 0);
+sprival (private_cacheable => undef);
+## Run the prepare, and make sure all the stats are as expected
+$sth = $dbh->prepare($SQL);
+statval (nocache_noselect  => 1);
+sprival (private_cacheable => 0);
+## Check that a normal statement handle was returned
+$t=q{Method prepare() returns a DBIx::Cache::st object};
+is (ref $sth, 'DBIx::Cache::st', $t);
+## Finish it off, and verify the 'finish' stats look normal
+statval (finish_cache   => 0);
+statval (finish_nocache => 0);
+$sth->finish();
+statval (finish_cache   => 0);
+statval (finish_nocache => 1);
+
+$t=q{>> UPDATE does not hit the cache};
+$SQL = "UPDATE $table SET a = 7";
+pass $t;
+$sth = $dbh->prepare($SQL);
+sprival (private_cacheable => 0);
+statval (nocache_noselect => 2);
+
+$t=q{>> DELETE does not hit the cache};
+$SQL = "DELETE FROM $table";
+pass $t;
+$sth = $dbh->prepare($SQL);
+sprival (private_cacheable => 0);
+statval (nocache_noselect => 3);
+$t=q{Method prepare() returns a DBIx::Cache::st object};
+is (ref $sth, 'DBIx::Cache::st', $t);
+$sth->finish();
+statval (finish_cache   => 0);
+statval (finish_nocache => 2);
+
+$t=q{>> Setting --force_dxc_nocache sets internal flag};
+$SQL = "SELECT 22345 \n\n--force_dxc_NOcache"; ## Always test multi-line
+pass $t;
+statval (forcenocache_hint    => 0);
+sprival (private_forcenocache => undef);
+$sth = $dbh->prepare($SQL);
+statval (forcenocache_hint    => 1);
+sprival (private_forcenocache => 1);
+
+## Double check the 'prepare' stats are still at zero as none of the above should have triggered them
+statval (prepare_hit    => 0);
+statval (prepare_miss   => 0);
+
+$t=q{>> Setting --force_dxc_cache sets internal flag};
+$SQL = "SELECT 22345 \n\n--force_dxc_cache";
+pass $t;
+statval (forcecache_hint      => 0);
+sprival (private_forcecache   => undef);
+sprival (private_needsexplain => undef);
+## Remove any keys from previous runs still in the cache for this query:
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+statval (forcecache_hint      => 1);
+sprival (private_forcecache   => 1);
+sprival (private_needsexplain => 1);
+statval (prepare_miss         => 1);
+statval (prepare_hit          => 0);
+
+$t=q{>> Query is not cached at prepare level before explain is run};
+pass $t;
+$sth = $dbh->prepare($SQL);
+statval (prepare_hit          => 0);
+statval (prepare_miss         => 2);
+sprival (private_needsexplain => 1);
+
+## Run an execute and see if subsequent prepares know about it
+$sth->execute();
+$sth = $dbh->prepare($SQL);
+statval (prepare_hit          => 1);
+statval (prepare_miss         => 2);
+sprival (private_needsexplain => undef);
+
+
+
+##
+## The execute() method
+##
+
+
+$t=q{>> Method execute()};
+pass $t;
+## Start fresh:
+$SQL = q{SELECT 'executetest' --force_dxc_cache};
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+statval (execute_hit   => 0);
+statval (execute_miss  => 1);
+$rv = $sth->execute();
+$t=q{Method execute() returns the correct value};
+is ($rv, 1, $t);
+statval (execute_hit   => 0);
+statval (execute_miss  => 2);
+## This is a list of tables (an empty one in this case)
+sprivaldeep (private_cacheable => []);
+
+$t = q{Method bind_param simply passes to the parent directly};
+eval { $sth->bind_param(1, 'FOOBAR'); };
+like ($@, qr{no placeholders to bind}, $t);
+
+$t = q{Method execute() behaves as expected with wrong number of args};
+statval (badexecuteargs => 0);
+eval { $sth->execute(1); };
+like ($@, qr{called with 1 bind variable}, $t);
+statval (badexecuteargs => 1);
+
+eval { $sth->execute(1,2,3); };
+like ($@, qr{called with 3 bind variables}, $t);
+statval (badexecuteargs => 2);
+
+$SQL = "SELECT 1 FROM $table WHERE a = ?::int";
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+eval { $sth->execute(); };
+like ($@, qr{unbound placeholder}, $t);
+statval (badexecuteargs => 3);
+
+eval { $sth->execute(123); };
+is ($@, q{}, $t);
+
+$sth->bind_param(1, 456);
+eval { $sth->execute(123); };
+is ($@, q{}, $t);
+
+eval { $sth->execute(); };
+is ($@, q{}, $t);
+statval (badexecuteargs => 4);
+
+$t = q{>> Method execute() leaves early if it knows query is not cacheable};
+pass $t;
+$SQL = "SELECT 'nocache' FROM pg_class";
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+statval (execute_miss     => 2);
+statval (execute_hit      => 2);
+statval (needsexplainfail => 0);
+statval (needsexplainok   => 3);
+$sth->execute();
+statval (needsexplainfail => 1);
+statval (needsexplainok   => 3);
+statval (execute_miss     => 2);
+statval (execute_hit      => 2);
+sprival (private_cacheable    => 0);
+sprival (private_needsexplain => 0);
+
+## Next time we run, we should short-circuit
+statval (noexecute        => 0);
+$sth->execute();
+statval (noexecute        => 1);
+
+## Same thing, but force it to work
+$SQL = "SELECT 'nocache' FROM pg_class --force_dxc_cache";
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+statval (execute_miss     => 2);
+statval (execute_hit      => 2);
+statval (needsexplainfail => 1);
+$sth->execute();
+statval (needsexplainok   => 4);
+statval (needsexplainfail => 1);
+statval (execute_miss     => 3);
+statval (execute_hit      => 2);
+sprival (private_needsexplain => 0);
+sprivaldeep (private_cacheable => [['pg_catalog','pg_class','r']]);
+$sth->execute();
+statval (execute_miss     => 3);
+statval (execute_hit      => 3);
+
+## Now to check some of the helper keys that are created
+$t=q{>> Queries store the caching decision in the dynamic p:{SQL} key correctly};
+pass $t;
+$SQL = 'SELECT 12345';
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+$key = "p:$SQL";
+is( $dbh->fetch_key($key), undef, $t);
+$sth->execute();
+is( $dbh->fetch_key($key), 1, $t);
+
+$SQL = "SELECT 12345 FROM $table";
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+$key = "p:$SQL";
+is( $dbh->fetch_key($key), undef, $t);
+$sth->execute();
+is( $dbh->fetch_key($key), 1, $t);
+
+
+exit;
+
+$t=q{Random fetchpath is generated and stored};
+my $fetchpath = $sth->{private_fetchpath};
+my $ekey = "e:$SQL";
+is( $dbh->fetch_key($ekey), "1:$fetchpath", $t);
+sprival (private_numrows => 1);
+sprival (private_executecachehit => 0);
+
+$t=q{>> Query is cached at prepare level after explain is run};
+$sth = $dbh->prepare("SELECT 22345 --force_dxc_cache");
+statval (prepare_hit => 1);
+statval (prepare_miss => 2);
+sprival (private_needsexplain => undef);
+
+$t=q{Second execute should hit the cache};
+$rv = $sth->execute();
+$t=q{Method execute() returns the correct value};
+is ($rv, 1, $t);
+statval (execute_hit => 1);
+statval (execute_miss => 1);
+sprival (private_fetchpath => $fetchpath);
+sprival (private_executecachehit => 1);
+sprivaldeep (private_executeargs => []);
+sprival (private_needsexplain => undef);
+sprivaldeep (private_cacheable => 1);
+
+
+$t=q{>> Test of affected tables};
+pass $t;
+$SQL = "SELECT 1 FROM pg_class";
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+$sth->execute();
+sprival (private_cacheable => 0);
+
+$SQL = "SELECT 1 FROM pg_class --force_dxc_cache";
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+sprival (private_forcecache => 1);
+sprival (private_needsexplain => 1);
+$sth->execute();
+statval (execute_hit => 1);
+statval (execute_miss => 2);
+sprivaldeep (private_cacheable => [['pg_catalog','pg_class','r']]);
+
+## Same thing again:
+$sth = $dbh->prepare($SQL);
+sprival (private_forcecache => 1);
+sprival (private_needsexplain => undef);
+$sth->execute();
+statval (execute_hit => 2);
+statval (execute_miss => 2);
+sprivaldeep (private_cacheable => 1);
+
+$t=q{Internal hash oid2relnames is correct};
+$SQL = q{SELECT oid FROM pg_class WHERE relname = 'pg_class'};
+$oid = $dbh->selectall_arrayref($SQL)->[0][0];
+$info = $dbh->fetch_key('oid2relnames');
+$oid2relnames = {$oid => ['pg_catalog','pg_class','r']};
+is_deeply ($info, $oid2relnames, $t);
+
+$t=q{>> Temp table does not get cached};
+pass $t;
+$SQL = qq{SELECT 1 FROM $table};
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+sprival (private_needsexplain => 1);
+statval (needsexplainfail => 1);
+$sth->execute();
+$t=q{Temp table is stored inside oid2relnames};
+$SQL = qq{SELECT c.oid, nspname FROM pg_class c, pg_namespace n WHERE relname = '$table' AND c.relnamespace = n.oid};
+($oid,$schema) = @{$dbh->selectall_arrayref($SQL)->[0]}[0,1];
+$oid2relnames->{$oid} = [$schema,$table,'r'];
+$info = $dbh->fetch_key('oid2relnames');
+is_deeply ($info, $oid2relnames, $t);
+statval (execute_hit => 2);
+statval (execute_miss => 2);
+statval (needsexplainfail => 2);
+sprivaldeep (private_cacheable => 0);
+
+$t=q{>> Non-temp table is cached correctly};
+pass $t;
+$SQL = qq{SELECT count(*) FROM $table2};
+delete_query_keys($SQL);
+$sth = $dbh->prepare($SQL);
+sprival (private_needsexplain => 1);
+statval (needsexplainfail => 2);
+$sth->execute();
+statval (execute_hit => 2);
+statval (execute_miss => 3);
+statval (needsexplainfail => 2);
+sprivaldeep (private_cacheable => [['public',$table2,'r']]);
+
+$t=q{Non-temp table is stored inside oid2relnames};
+$SQL = qq{SELECT oid FROM pg_class WHERE relname = '$table2'};
+$oid = $dbh->selectall_arrayref($SQL)->[0][0];
+$info = $dbh->fetch_key('oid2relnames');
+$oid2relnames->{$oid} = ['public',$table2,'r'];
+is_deeply ($info, $oid2relnames, $t);
+
+$t=q{Method fetch() works};
+statval (fetch => 0);
+$info = $sth->fetch();
+
+$t=q{Method fetch() returns correct value};
+is_deeply($info, [0], $t);
+statval (fetch => 1);
+statval (fetchend => 0);
+
+$t=q{Method fetch() stores correct cached value};
+$fetchpath = $sth->{private_fetchpath};
+$key = "F0:$fetchpath";
+is_deeply ($dbh->fetch_key($key), [0], $t);
+statval (fetch_hit => 0);
+statval (fetch_miss => 1);
+
+$info = $sth->fetch();
+statval (fetchend => 1);
+is($info, undef, $t);
+sprival (private_curtuple => 0);
+statval (fetch_hit => 0);
+statval (fetch_miss => 1);
+
+## Test of functions
+
+$t=q{Volatile system function prevents caching};
+
+$t=q{Functions are stored correctly in 'volfuncs'};
+
+$t=q{Non-volatile system function allows caching};
+
+$t=q{Functions are stored correctly in 'volfuncs'};
+
+$t=q{User-created volatile function prevents caching};
+
+$t=q{Functions are stored correctly in 'volfuncs'};
+
+$t=q{User-created non-volatile function allows caching};
+
+$t=q{Functions are stored correctly in 'volfuncs'};
+
+$t=q{Using --force_dxc_cache allows volatile functions};
+
+$t=q{Using --force_dxc_NOcache disallows non-volatile functions};
+
+
+
+$t=q{A whitelist passed to connect() is stored internally};
+
+$t=q{Global whitelist does not allow non-matching queries to be cached};
+
+$t=q{Global whitelist allows matching queries to be cached};
+
+$t=q{A blacklist passed to connect() is stored internally};
+
+$t=q{Global blacklist does not allow matching queries to be cached};
+
+$t=q{Global blacklist allows non-matching queries to be cached};
+
+$t=q{Global blacklist trumps global whitelist};
+
+
+
+$t=q{Database handle level whitelist works as expected};
+
+$t=q{Database handle level whitelist overrides(?) global whitelist};
+
+$t=q{Database handle level blacklist works as expected};
+
+$t=q{Database handle level blacklist overrides(?) global blacklist};
+
+
+
+$t=q{Statement handle level whitelist works as expected};
+
+$t=q{Statement handle level whitelist overrides(?) global whitelist};
+
+$t=q{Statement handle level blacklist works as expected};
+
+$t=q{Statement handle level blacklist overrides(?) global blacklist};
+
+
+
+##
+## fetchall_arrayref
+##
+
+##
+## fetchrow_arrayref
+##
+
+##
+## fetchall_hashref
+##
+
+##
+## fetchrow_hashref
+##
+
+##
+## fetchall_array
+##
+
+
+
+
+
+exit;
+
+
+} ## end of run_standard_tests
+__END__
+
+
+$t=q{All fetch rows were registered with table invalidation};
+$info = $dbh->fetch_key('T:dc');
+my %tcache;
+## The table cache should have four entries:
+## 1. From the end of the execute() section:
+$tcache{$tcache1} = 1;
+## 2. The execte above
+my $tcache2 = sha256_hex("e:$SQL");
+$tcache{$tcache2} = 1;
+## 3. The first row
+my $tcache3 = sha256_hex("F0:$fetchpath");
+$tcache{"\@$tcache3"} = 1;
+## 4. The second row
+my $tcache4 = sha256_hex("F1:$fetchpath");
+$tcache{"\@$tcache4"} = 1;
+
+is_deeply($info, \%tcache, $t);
+
+$t=q{Deleted table cache no longer exists}; ## sanity check of caching engine really
+$dbh->delete_key('T:dc');
+$info = $dbh->fetch_key('T:dc');
+is_deeply($info, undef, $t);
+
+$t=q{Purging table cache causes an execute miss};
+is_deeply( ehitmiss, [2,3], $t);
+$sth->execute();
+is_deeply( ehitmiss, [2,4], $t);
+
+$t=q{Purging table cache causes a fetch miss};
+is_deeply( fhitmiss, [2,2], $t);
+$info = $sth->fetch();
+is_deeply( fhitmiss, [2,3], $t);
+
+##
+## Conditional invalidation
+##
+
+$dbh->delete_key('T:dc');
+$t=q{Attribute dxc_whereclause populates the private hash correctly};
+$SQL = "SELECT * FROM $table WHERE a > 1 AND b <> 'foobar'";
+$sth = $dbh->prepare($SQL, {dxc_whereclause => 'a > 1'});
+$info = $sth->{private_whereclause};
+is_deeply($info, 'a > 1', $t);
+
+$t=q{Attribute dxc_whereclause creates custom invalidation struct};
+$sth->execute();
+undef %tcache;
+$tcache{whereclause} = 'a > 1';
+$key = sha256_hex("e:$SQL");
+$tcache{$key} = 1;
+$info = $dbh->fetch_key('T:dc');
+is_deeply($info, \%tcache, $t);
+
+$t=q{Counter 'nowhereclausedeletematch' starts at 0};
+is( nowhereclausedeletematch, 0, $t);
+
+$t=q{Tables invalidation structs with whereclause only cleared on matching clause};
+$dbh->delete_key('T:dc', {whereclause => 'c < 1'});
+$info = $dbh->fetch_key('T:dc');
+is_deeply($info, \%tcache, $t);
+
+$t=q{Counter 'nowhereclausedeletematch' is set correctly};
+is( nowhereclausedeletematch, 1, $t);
+
+$t=q{Tables invalidation structs with whereclause only cleared on matching clause};
+$dbh->delete_key('T:dc', {whereclause => 'a > 1'});
+$info = $dbh->fetch_key('T:dc');
+is_deeply($info, undef, $t);
+
+##
+## fetchall_arrayref()
+##
+
+$t=q{Counter 'nofetchallarrayref' starts at 0};
+is( nofetchallarrayref, 0, $t);
+
+$t=q{Non-caching query returns correct result via fetchall_arrayref};
+$sth = $dbh->prepare('SELECT 123,456 FROM pg_class LIMIT 1');
+$sth->execute();
+$info = $sth->fetchall_arrayref();
+is_deeply($info, [[123,456]], $t);
+
+$t=q{Counter 'nofetchallarrayref' increments correctly};
+is( nofetchallarrayref, 1, $t);
+
+$t=q{Counters 'faahit' and 'faamis' start at 0};
+is_deeply( faahitmiss, [0,0], $t);
+
+$t=q{Counter 'fetchallarrayref' starts at 0};
+is( fetchallarrayref, 0, $t);
+
+$t=q{Cacheable query returns correct result via fetchall_arrayref};
+$sth = $dbh->prepare("SELECT 123,456 FROM $table LIMIT 1");
+$sth->execute();
+$info = $sth->fetchall_arrayref();
+is_deeply($info, [[123,456]], $t);
+
+$t=q{Counter 'fetchallarrayref' increments correctly};
+is( fetchallarrayref, 1, $t);
+
+$t=q{Counter 'faamiss' increments correctly};
+is_deeply( faahitmiss, [0,1], $t);
+
+$t=q{Cacheable query returns correct result via fetchall_arrayref};
+$sth = $dbh->prepare("SELECT 123,456 FROM $table LIMIT 1");
+$sth->execute();
+$info = $sth->fetchall_arrayref();
+is_deeply($info, [[123,456]], $t);
+
+$t=q{Counter 'fetchallarrayref' increments correctly};
+is( fetchallarrayref, 2, $t);
+
+$t=q{Counter 'faahit' increments correctly};
+is_deeply( faahitmiss, [1,1], $t);
+
+## Test arguments to fetchall_arrayref
+
+## Test for no overlap of fetch and fetchall_arrayref
+
+## Test all other access methods
+
+} ## end of run_standard_tests
+
+1;
+
